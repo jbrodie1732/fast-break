@@ -13,6 +13,14 @@ interface Assignment {
   team: string;
   index: number;
   revealed?: boolean;
+  isCombo?: boolean;
+  teams?: string[]; // For combos: [team1, team2]
+}
+
+interface Combo {
+  id: number;
+  team1: string | null;
+  team2: string | null;
 }
 
 export default function Home() {
@@ -27,6 +35,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [usernamesInput, setUsernamesInput] = useState<string>("");
   const [parsedUsernames, setParsedUsernames] = useState<string[]>([]);
+  const [userCount, setUserCount] = useState<number>(30);
+  const [combos, setCombos] = useState<Combo[]>([]);
+  const [draggedTeam, setDraggedTeam] = useState<string | null>(null);
   const revealTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const scheduledRevealsRef = useRef<Set<number>>(new Set());
 
@@ -39,6 +50,25 @@ export default function Home() {
   useEffect(() => {
     loadAssignments();
   }, []);
+
+  // Calculate combos needed when user count changes
+  useEffect(() => {
+    const combosNeeded = 30 - userCount;
+    if (combosNeeded > 0) {
+      setCombos(
+        Array.from({ length: combosNeeded }, (_, i) => ({
+          id: i,
+          team1: null,
+          team2: null,
+        }))
+      );
+    } else {
+      setCombos([]);
+    }
+    // Reset username input when count changes
+    setUsernamesInput("");
+    setParsedUsernames([]);
+  }, [userCount]);
 
   // Parse usernames from input
   useEffect(() => {
@@ -134,11 +164,17 @@ export default function Home() {
     try {
       const allAssignments = await getAllAssignments(CONTRACT_ADDRESS);
       const assignmentArray: Assignment[] = Object.values(allAssignments).map(
-        (a) => ({
-          username: a.username,
-          team: a.team,
-          index: a.assignmentIndex,
-        })
+        (a) => {
+          const isCombo = a.team.includes(",");
+          const teams = isCombo ? a.team.split(",").map(t => t.trim()) : undefined;
+          return {
+            username: a.username,
+            team: a.team,
+            index: a.assignmentIndex,
+            isCombo,
+            teams,
+          };
+        }
       );
       assignmentArray.sort((a, b) => a.index - b.index);
       setAssignments(assignmentArray);
@@ -149,25 +185,87 @@ export default function Home() {
     }
   };
 
+  // Get teams that are NOT used in combos
+  const getAvailableTeams = (): string[] => {
+    const usedTeams = new Set<string>();
+    combos.forEach(combo => {
+      if (combo.team1) usedTeams.add(combo.team1);
+      if (combo.team2) usedTeams.add(combo.team2);
+    });
+    return nbaTeams.filter(team => !usedTeams.has(team));
+  };
+
+  // Check if a team is used in any combo
+  const isTeamUsed = (team: string): boolean => {
+    return combos.some(combo => combo.team1 === team || combo.team2 === team);
+  };
+
+  // Handle drag start
+  const handleDragStart = (team: string) => {
+    if (!isTeamUsed(team)) {
+      setDraggedTeam(team);
+    }
+  };
+
+  // Handle drag over
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  // Handle drop on combo slot
+  const handleDrop = (comboId: number, slot: "team1" | "team2") => {
+    if (!draggedTeam || isTeamUsed(draggedTeam)) return;
+    
+    setCombos(prevCombos => 
+      prevCombos.map(combo => {
+        if (combo.id === comboId) {
+          // Don't allow same team in both slots
+          if (slot === "team1" && combo.team2 === draggedTeam) return combo;
+          if (slot === "team2" && combo.team1 === draggedTeam) return combo;
+          return { ...combo, [slot]: draggedTeam };
+        }
+        // Don't allow duplicate teams across combos
+        if (combo.team1 === draggedTeam || combo.team2 === draggedTeam) return combo;
+        return combo;
+      })
+    );
+    setDraggedTeam(null);
+  };
+
+  // Remove team from combo
+  const removeTeamFromCombo = (comboId: number, slot: "team1" | "team2") => {
+    setCombos(prevCombos =>
+      prevCombos.map(combo =>
+        combo.id === comboId ? { ...combo, [slot]: null } : combo
+      )
+    );
+  };
+
+  // Check if all combos are complete
+  const areCombosComplete = (): boolean => {
+    return combos.every(combo => combo.team1 && combo.team2);
+  };
+
   const handleAssign = async () => {
     if (!user || !user.loggedIn) {
       await authenticate();
       return;
     }
 
-    // Validate usernames
+    // Validate usernames match user count
     if (parsedUsernames.length === 0) {
       setError("Please enter at least one username");
       return;
     }
 
-    if (parsedUsernames.length !== 30) {
-      setError(`Please enter exactly 30 usernames. You entered ${parsedUsernames.length}.`);
+    if (parsedUsernames.length !== userCount) {
+      setError(`Please enter exactly ${userCount} usernames. You entered ${parsedUsernames.length}.`);
       return;
     }
 
-    if (parsedUsernames.length !== nbaTeams.length) {
-      setError(`Number of usernames (${parsedUsernames.length}) must match number of teams (${nbaTeams.length})`);
+    // Validate combos if needed
+    if (combos.length > 0 && !areCombosComplete()) {
+      setError("Please complete all multi-team combos before starting the assignment.");
       return;
     }
 
@@ -185,17 +283,31 @@ export default function Home() {
     scheduledRevealsRef.current.clear();
 
     try {
-      // Use parsed usernames from input
-      const remainingUsernames = [...parsedUsernames];
-      const remainingTeams = [...nbaTeams];
+      // Prepare teams and combos
+      const singleTeams = getAvailableTeams();
+      const comboStrings = combos.map(combo => `${combo.team1}, ${combo.team2}`);
+      
+      // Validate totals
+      if (singleTeams.length + comboStrings.length !== userCount) {
+        setError(`Total assignments (${singleTeams.length} single + ${comboStrings.length} combos) must equal ${userCount} users.`);
+        setIsAssigning(false);
+        return;
+      }
+
       const newAssignments: Assignment[] = [];
 
       // Callback to handle real-time assignment updates
       const onAssignment = (assignment: AssignmentEvent) => {
+        // Check if this is a combo (contains comma)
+        const isCombo = assignment.team.includes(",");
+        const teams = isCombo ? assignment.team.split(",").map(t => t.trim()) : [assignment.team];
+        
         newAssignments.push({
           username: assignment.username,
           team: assignment.team,
           index: assignment.assignmentIndex,
+          isCombo,
+          teams: isCombo ? teams : undefined,
         });
         // Sort by index and update state
         const sorted = [...newAssignments].sort((a, b) => a.index - b.index);
@@ -204,8 +316,9 @@ export default function Home() {
 
       // Execute the transaction
       const txId = await assignTeams(
-        remainingUsernames,
-        remainingTeams,
+        parsedUsernames,
+        singleTeams,
+        comboStrings,
         onAssignment,
         CONTRACT_ADDRESS
       );
@@ -267,11 +380,160 @@ export default function Home() {
             </p>
           </div>
 
+          {/* User Count Selector - Only show when wallet is connected */}
+          {user && user.loggedIn && (
+            <div className="mb-8 max-w-xs mx-auto">
+              <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-4 border border-slate-800/50 shadow-xl">
+                <label className="block text-sm font-medium text-slate-300 mb-3 text-center">
+                  Number of Users:
+                </label>
+                <div className="flex justify-center">
+                  <select
+                    value={userCount}
+                    onChange={(e) => setUserCount(parseInt(e.target.value))}
+                    className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 text-center min-w-[120px]"
+                    disabled={isAssigning}
+                  >
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map(num => (
+                      <option key={num} value={num}>{num}</option>
+                    ))}
+                  </select>
+                </div>
+                {userCount < 30 && (
+                  <p className="mt-3 text-xs text-slate-400 text-center">
+                    {30 - userCount} multi-team combo{30 - userCount !== 1 ? 's' : ''} needed
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Combo Builder - Only show when combos are needed */}
+          {user && user.loggedIn && combos.length > 0 && (
+            <div className="mb-8">
+              <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-6 border border-slate-800/50 shadow-xl">
+                <h3 className="text-3xl font-bold text-slate-200 mb-4 text-center uppercase">
+                  BUILD MULTI-TEAM COMBOS
+                </h3>
+                <div className="grid md:grid-cols-2 gap-6">
+                  {/* Left: Available Teams */}
+                  <div>
+                    <h4 className="text-base font-medium text-slate-300 mb-3 uppercase">ALL NBA TEAMS</h4>
+                    <div className="grid grid-cols-5 gap-2 max-h-[400px] overflow-y-auto p-4 bg-slate-800/30 rounded-xl border border-slate-700/30">
+                      {nbaTeams.map((team) => {
+                        const isUsed = isTeamUsed(team);
+                        return (
+                          <div
+                            key={team}
+                            draggable={!isUsed}
+                            onDragStart={() => handleDragStart(team)}
+                            className={`flex flex-col items-center p-2 rounded-lg border-2 transition-all ${
+                              isUsed
+                                ? "opacity-30 border-slate-700/30 cursor-not-allowed blur-[2px]"
+                                : "border-slate-600/50 hover:border-slate-500 hover:bg-slate-700/30 cursor-grab active:cursor-grabbing"
+                            }`}
+                          >
+                            <img
+                              src={getTeamLogoUrl(team)}
+                              alt={team}
+                              className="w-12 h-12 object-contain"
+                              draggable={false}
+                            />
+                            <span className="text-[10px] text-slate-400 mt-1 text-center leading-tight">
+                              {team.split(" ").pop()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Right: Combo Panels */}
+                  <div>
+                    <h4 className="text-base font-medium text-slate-300 mb-3 uppercase">MULTI-TEAM COMBOS</h4>
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                      {combos.map((combo) => (
+                        <div
+                          key={combo.id}
+                          className="bg-slate-800/30 rounded-xl p-4 border border-slate-700/30"
+                        >
+                          <p className="text-xs text-slate-400 mb-2">Combo {combo.id + 1}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Team 1 Slot */}
+                            <div
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                handleDrop(combo.id, "team1");
+                              }}
+                              className="min-h-[80px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center relative bg-slate-700/20 border-slate-600/50"
+                            >
+                              {combo.team1 ? (
+                                <>
+                                  <img
+                                    src={getTeamLogoUrl(combo.team1)}
+                                    alt={combo.team1}
+                                    className="w-12 h-12 object-contain"
+                                  />
+                                  <span className="text-[10px] text-slate-400 mt-1 text-center leading-tight">
+                                    {combo.team1.split(" ").pop()}
+                                  </span>
+                                  <button
+                                    onClick={() => removeTeamFromCombo(combo.id, "team1")}
+                                    className="absolute top-1 right-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                                  >
+                                    ×
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-slate-500">Drop Team 1</span>
+                              )}
+                            </div>
+                            {/* Team 2 Slot */}
+                            <div
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                handleDrop(combo.id, "team2");
+                              }}
+                              className="min-h-[80px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center relative bg-slate-700/20 border-slate-600/50"
+                            >
+                              {combo.team2 ? (
+                                <>
+                                  <img
+                                    src={getTeamLogoUrl(combo.team2)}
+                                    alt={combo.team2}
+                                    className="w-12 h-12 object-contain"
+                                  />
+                                  <span className="text-[10px] text-slate-400 mt-1 text-center leading-tight">
+                                    {combo.team2.split(" ").pop()}
+                                  </span>
+                                  <button
+                                    onClick={() => removeTeamFromCombo(combo.id, "team2")}
+                                    className="absolute top-1 right-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                                  >
+                                    ×
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-slate-500">Drop Team 2</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Usernames Input */}
           <div className="mb-8 max-w-3xl mx-auto">
             <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-6 border border-slate-800/50 shadow-xl">
               <label className="block text-sm font-medium text-slate-300 mb-3">
-                Enter 30 Usernames (one per line or comma-separated)
+                Enter {userCount} Username{userCount !== 1 ? 's' : ''} (one per line or comma-separated)
               </label>
               <textarea
                 value={usernamesInput}
@@ -288,16 +550,16 @@ user30"
               <div className="mt-3 flex items-center justify-between">
                 <p className="text-xs text-slate-500">
                   {parsedUsernames.length > 0 ? (
-                    <span className={parsedUsernames.length === 30 ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
-                      {parsedUsernames.length} / 30 usernames
+                    <span className={parsedUsernames.length === userCount ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
+                      {parsedUsernames.length} / {userCount} username{userCount !== 1 ? 's' : ''}
                     </span>
                   ) : (
                     "Paste usernames above (one per line or comma-separated)"
                   )}
                 </p>
-                {parsedUsernames.length > 0 && parsedUsernames.length !== 30 && (
+                {parsedUsernames.length > 0 && parsedUsernames.length !== userCount && (
                   <p className="text-xs text-amber-400">
-                    Need {30 - parsedUsernames.length} more
+                    Need {userCount - parsedUsernames.length} more
                   </p>
                 )}
               </div>
@@ -308,7 +570,7 @@ user30"
           <div className="text-center mb-12">
             <button
               onClick={handleAssign}
-              disabled={isAssigning || (!user || !user.loggedIn) || parsedUsernames.length !== 30}
+              disabled={isAssigning || (!user || !user.loggedIn) || parsedUsernames.length !== userCount || (combos.length > 0 && !areCombosComplete())}
               className="bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 disabled:from-slate-800 disabled:to-slate-900 disabled:cursor-not-allowed disabled:opacity-50 px-12 py-5 rounded-xl font-semibold text-2xl transition-all transform hover:scale-105 shadow-2xl border border-slate-600/50 hover:border-slate-500"
             >
               {isAssigning ? (
@@ -366,8 +628,8 @@ user30"
             </div>
           )}
 
-          {/* Transaction ID */}
-          {transactionId && (
+          {/* Transaction ID - Only show after all tiles are revealed */}
+          {transactionId && assignments.length > 0 && revealedAssignments.size === assignments.length && (
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 mb-8 backdrop-blur-sm">
               <p className="text-xs text-slate-400 mb-1">Transaction ID:</p>
               <p className="font-mono text-xs break-all text-slate-300">{transactionId}</p>
@@ -397,46 +659,81 @@ user30"
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {assignments.map((assignment) => {
                   const isRevealed = revealedAssignments.has(assignment.index);
-                  const logoUrl = getTeamLogoUrl(assignment.team);
+                  const isCombo = assignment.isCombo || assignment.team.includes(",");
+                  const teams = isCombo 
+                    ? (assignment.teams || assignment.team.split(",").map(t => t.trim()))
+                    : [assignment.team];
                   
                   return (
                     <div
                       key={assignment.index}
-                      className={`relative bg-slate-800/50 rounded-xl p-5 border border-slate-700/50 overflow-hidden transition-all duration-500 ${
+                      className={`relative bg-slate-800/50 rounded-xl p-5 border border-slate-700/50 overflow-hidden transition-all duration-500 min-h-[180px] ${
                         isRevealed 
                           ? "opacity-100 translate-y-0" 
                           : "opacity-0 translate-y-4"
                       } hover:bg-slate-800/70 hover:border-slate-600/50 hover:shadow-lg`}
                     >
-                      {/* Faded Team Logo Background */}
-                      <div 
-                        className="absolute inset-0 opacity-[0.25] pointer-events-none"
-                        style={{
-                          backgroundImage: `url(${logoUrl})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
-                          backgroundRepeat: "no-repeat",
-                          filter: "blur(6px) brightness(0.6)",
-                        }}
-                      />
+                      {/* Faded Team Logo Background - Split for combos */}
+                      {isCombo && teams.length === 2 ? (
+                        <div className="absolute inset-0 opacity-[0.5] pointer-events-none flex">
+                          <div 
+                            className="w-1/2 h-full"
+                            style={{
+                              backgroundImage: `url(${getTeamLogoUrl(teams[0])})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                              backgroundRepeat: "no-repeat",
+                              filter: "blur(3px) brightness(0.7)",
+                            }}
+                          />
+                          <div 
+                            className="w-1/2 h-full"
+                            style={{
+                              backgroundImage: `url(${getTeamLogoUrl(teams[1])})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                              backgroundRepeat: "no-repeat",
+                              filter: "blur(3px) brightness(0.7)",
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div 
+                          className="absolute inset-0 opacity-[0.5] pointer-events-none"
+                          style={{
+                            backgroundImage: `url(${getTeamLogoUrl(assignment.team)})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                            backgroundRepeat: "no-repeat",
+                            filter: "blur(3px) brightness(0.7)",
+                          }}
+                        />
+                      )}
                       
-                      <div className="relative z-10">
-                        <div className="flex items-center justify-between mb-3">
+                      <div className="relative z-10 h-full flex flex-col">
+                        <div className="flex items-start justify-between mb-auto">
                           <span className="text-xs text-slate-500 font-mono">
                             #{assignment.index + 1}
                           </span>
-                          {isAssigning && isRevealed && (
+                          {isCombo && (
+                            <span className="text-sm text-purple-400 font-bold uppercase tracking-wider px-2 py-1 bg-purple-500/20 rounded-md border border-purple-500/30 -mr-1 -mt-1">
+                              COMBO
+                            </span>
+                          )}
+                          {isAssigning && isRevealed && !isCombo && (
                             <span className="text-xs text-emerald-400 animate-pulse flex items-center gap-1">
                               <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
                               Live
                             </span>
                           )}
                         </div>
-                        <div className="font-bold text-lg mb-2 text-slate-100">
-                          {assignment.username}
-                        </div>
-                        <div className="text-slate-400 text-sm font-medium">
-                          {assignment.team}
+                        <div className="mt-auto">
+                          <div className="font-bold text-lg mb-2 text-slate-100">
+                            {assignment.username}
+                          </div>
+                          <div className="text-slate-400 text-sm font-medium">
+                            {isCombo ? teams.join(" + ") : assignment.team}
+                          </div>
                         </div>
                       </div>
                     </div>

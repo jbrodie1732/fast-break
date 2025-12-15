@@ -5,11 +5,11 @@ import * as t from "@onflow/types";
 const assignTeamsTransaction = `
 import TeamAssignment from 0xTeamAssignment
 
-transaction(usernames: [String], teams: [String]) {
+transaction(usernames: [String], teams: [String], combos: [String]) {
     
     execute {
         // Perform the random assignment
-        let assignments = TeamAssignment.assignAllRandomly(usernames: usernames, teams: teams)
+        let assignments = TeamAssignment.assignAllRandomly(usernames: usernames, teams: teams, combos: combos)
         log("Assignments completed: ".concat(assignments.length.toString()))
     }
 }
@@ -41,6 +41,7 @@ export interface AssignmentEvent {
 export async function assignTeams(
   usernames: string[],
   teams: string[],
+  combos: string[],
   onAssignment: (assignment: AssignmentEvent) => void,
   contractAddress: string
 ): Promise<string> {
@@ -58,6 +59,7 @@ export async function assignTeams(
       args: (arg: any, t: any) => [
         arg(usernames, t.Array(t.String)),
         arg(teams, t.Array(t.String)),
+        arg(combos, t.Array(t.String)),
       ],
       proposer: fcl.authz as any,
       payer: fcl.authz as any,

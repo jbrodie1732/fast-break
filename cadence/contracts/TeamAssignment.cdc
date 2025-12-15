@@ -34,36 +34,51 @@ access(all) contract TeamAssignment {
     
     // Main function: Randomly assign all usernames to teams in one transaction
     // This function uses Flow's revertibleRandom() for on-chain randomness
-    access(all) fun assignAllRandomly(usernames: [String], teams: [String]): {UInt64: Assignment} {
+    // Combos are passed as arrays of two-team strings like ["Team1, Team2", "Team3, Team4"]
+    access(all) fun assignAllRandomly(usernames: [String], teams: [String], combos: [String]): {UInt64: Assignment} {
         pre {
-            usernames.length == teams.length: "Number of usernames must equal number of teams"
-            usernames.length > 0: "Must provide at least one username and team"
+            usernames.length > 0: "Must provide at least one username"
+            (teams.length + combos.length) == usernames.length: "Number of single teams plus combos must equal number of usernames"
         }
         
         var remainingUsernames = usernames
-        var remainingTeams = teams
+        var remainingSingleTeams = teams
+        var remainingCombos = combos
         var result: {UInt64: Assignment} = {}
         var index: UInt64 = 0
         let currentTime = getCurrentBlock().timestamp
         
-        // Loop through and assign each username to a random team
+        // Combine single teams and combos into one pool for random assignment
+        var allAssignments: [String] = []
+        var i = 0
+        while i < remainingSingleTeams.length {
+            allAssignments.append(remainingSingleTeams[i])
+            i = i + 1
+        }
+        i = 0
+        while i < remainingCombos.length {
+            allAssignments.append(remainingCombos[i])
+            i = i + 1
+        }
+        
+        // Loop through and assign each username to a random team or combo
         while remainingUsernames.length > 0 {
             // Get random index for username selection
             let usernameRandomValue = revertibleRandom<UInt64>()
             let usernameIndex = usernameRandomValue % UInt64(remainingUsernames.length)
             
-            // Get random index for team selection
-            let teamRandomValue = revertibleRandom<UInt64>()
-            let teamIndex = teamRandomValue % UInt64(remainingTeams.length)
+            // Get random index for assignment selection (team or combo)
+            let assignmentRandomValue = revertibleRandom<UInt64>()
+            let assignmentIndex = assignmentRandomValue % UInt64(allAssignments.length)
             
-            // Get the selected username and team
+            // Get the selected username and assignment (team or combo)
             let selectedUsername = remainingUsernames[Int(usernameIndex)]
-            let selectedTeam = remainingTeams[Int(teamIndex)]
+            let selectedAssignment = allAssignments[Int(assignmentIndex)]
             
             // Create assignment
             let assignment = Assignment(
                 username: selectedUsername,
-                team: selectedTeam,
+                team: selectedAssignment,
                 assignmentIndex: index,
                 timestamp: currentTime
             )
@@ -75,13 +90,13 @@ access(all) contract TeamAssignment {
             // Emit event for this assignment
             emit AssignmentMade(
                 username: selectedUsername,
-                team: selectedTeam,
+                team: selectedAssignment,
                 assignmentIndex: index
             )
             
-            // Remove assigned username and team from remaining pools
+            // Remove assigned username and assignment from remaining pools
             remainingUsernames = self.removeElement(arr: remainingUsernames, index: Int(usernameIndex))
-            remainingTeams = self.removeElement(arr: remainingTeams, index: Int(teamIndex))
+            allAssignments = self.removeElement(arr: allAssignments, index: Int(assignmentIndex))
             
             index = index + 1
         }
