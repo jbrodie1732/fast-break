@@ -6,7 +6,6 @@ import { CONTRACT_ADDRESS } from "@/lib/flow.config";
 import { getTeamLogoUrl } from "@/lib/team-logos";
 import * as fcl from "@onflow/fcl";
 import nbaTeams from "@/data/nba-teams.json";
-import usernames from "@/data/usernames.json";
 import tyreseMaxeyFacts from "@/data/tyrese-maxey-facts.json";
 
 interface Assignment {
@@ -26,6 +25,8 @@ export default function Home() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usernamesInput, setUsernamesInput] = useState<string>("");
+  const [parsedUsernames, setParsedUsernames] = useState<string[]>([]);
   const revealTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const scheduledRevealsRef = useRef<Set<number>>(new Set());
 
@@ -38,6 +39,20 @@ export default function Home() {
   useEffect(() => {
     loadAssignments();
   }, []);
+
+  // Parse usernames from input
+  useEffect(() => {
+    if (usernamesInput.trim()) {
+      // Split by newlines or commas, trim whitespace, filter empty strings
+      const parsed = usernamesInput
+        .split(/[\n,]/)
+        .map(u => u.trim())
+        .filter(u => u.length > 0);
+      setParsedUsernames(parsed);
+    } else {
+      setParsedUsernames([]);
+    }
+  }, [usernamesInput]);
 
   // Reveal fact when assignment starts
   useEffect(() => {
@@ -140,6 +155,22 @@ export default function Home() {
       return;
     }
 
+    // Validate usernames
+    if (parsedUsernames.length === 0) {
+      setError("Please enter at least one username");
+      return;
+    }
+
+    if (parsedUsernames.length !== 30) {
+      setError(`Please enter exactly 30 usernames. You entered ${parsedUsernames.length}.`);
+      return;
+    }
+
+    if (parsedUsernames.length !== nbaTeams.length) {
+      setError(`Number of usernames (${parsedUsernames.length}) must match number of teams (${nbaTeams.length})`);
+      return;
+    }
+
     setIsAssigning(true);
     setError(null);
     setAssignments([]);
@@ -154,8 +185,8 @@ export default function Home() {
     scheduledRevealsRef.current.clear();
 
     try {
-      // Create a copy of arrays for manipulation
-      const remainingUsernames = [...usernames];
+      // Use parsed usernames from input
+      const remainingUsernames = [...parsedUsernames];
       const remainingTeams = [...nbaTeams];
       const newAssignments: Assignment[] = [];
 
@@ -236,11 +267,48 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Usernames Input */}
+          <div className="mb-8 max-w-3xl mx-auto">
+            <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-6 border border-slate-800/50 shadow-xl">
+              <label className="block text-sm font-medium text-slate-300 mb-3">
+                Enter 30 Usernames (one per line or comma-separated)
+              </label>
+              <textarea
+                value={usernamesInput}
+                onChange={(e) => setUsernamesInput(e.target.value)}
+                placeholder="user1
+user2
+user3
+...
+user30"
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 resize-none font-mono text-sm min-h-[200px]"
+                rows={10}
+                disabled={isAssigning}
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <p className="text-xs text-slate-500">
+                  {parsedUsernames.length > 0 ? (
+                    <span className={parsedUsernames.length === 30 ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
+                      {parsedUsernames.length} / 30 usernames
+                    </span>
+                  ) : (
+                    "Paste usernames above (one per line or comma-separated)"
+                  )}
+                </p>
+                {parsedUsernames.length > 0 && parsedUsernames.length !== 30 && (
+                  <p className="text-xs text-amber-400">
+                    Need {30 - parsedUsernames.length} more
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Assignment Button */}
           <div className="text-center mb-12">
             <button
               onClick={handleAssign}
-              disabled={isAssigning || (!user || !user.loggedIn)}
+              disabled={isAssigning || (!user || !user.loggedIn) || parsedUsernames.length !== 30}
               className="bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 disabled:from-slate-800 disabled:to-slate-900 disabled:cursor-not-allowed disabled:opacity-50 px-12 py-5 rounded-xl font-semibold text-2xl transition-all transform hover:scale-105 shadow-2xl border border-slate-600/50 hover:border-slate-500"
             >
               {isAssigning ? (
