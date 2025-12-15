@@ -59,8 +59,8 @@ export async function assignTeams(
         arg(usernames, t.Array(t.String)),
         arg(teams, t.Array(t.String)),
       ],
-      proposer: fcl.authz,
-      payer: fcl.authz,
+      proposer: fcl.authz as any,
+      payer: fcl.authz as any,
       authorizations: [], // No authorizations needed - transaction has no prepare block
       limit: 9999,
     });
