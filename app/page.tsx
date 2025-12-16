@@ -634,7 +634,7 @@ user30"
               <p className="text-xs text-slate-400 mb-1">Transaction ID:</p>
               <p className="font-mono text-xs break-all text-slate-300">{transactionId}</p>
               <a
-                href={`https://testnet.flowscan.io/tx/${transactionId}`}
+                href={`https://flowscan.io/tx/${transactionId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-400 hover:text-slate-300 text-xs mt-2 inline-block transition-colors"
