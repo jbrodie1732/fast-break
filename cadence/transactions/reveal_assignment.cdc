@@ -2,7 +2,7 @@
 // Phase 2: Reveal the random assignment using committed randomness
 // Must be called after commit_assignment.cdc and after a few blocks have passed
 
-import TeamAssignment from 0xTeamAssignment
+import TeamAssignment from 0x2376ce69fdac1763
 
 transaction {
 

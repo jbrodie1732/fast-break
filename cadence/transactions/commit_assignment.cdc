@@ -2,7 +2,7 @@
 // Phase 1: Lock in the assignment - stores receipt in user's account
 // The actual random assignment happens in reveal_assignment.cdc
 
-import TeamAssignment from 0xTeamAssignment
+import TeamAssignment from 0x2376ce69fdac1763
 
 transaction(usernames: [String], teams: [String], combos: [String]) {
 
