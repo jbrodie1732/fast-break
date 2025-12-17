@@ -10,7 +10,7 @@ import {
   getFlowscanUrl,
   AssignmentEvent
 } from "@/lib/flow-interactions";
-import { CONTRACT_ADDRESS } from "@/lib/flow.config";
+import { CONTRACT_ADDRESS, IS_MAINNET } from "@/lib/flow.config";
 import { getTeamLogoUrl } from "@/lib/team-logos";
 import * as fcl from "@onflow/fcl";
 import nbaTeams from "@/data/nba-teams.json";
@@ -281,12 +281,6 @@ export default function Home() {
       return;
     }
 
-    // Validate combos if needed
-    if (combos.length > 0 && !areCombosComplete()) {
-      setError("Please complete all multi-team combos before starting the assignment.");
-      return;
-    }
-
     setIsAssigning(true);
     setError(null);
     setAssignments([]);
@@ -307,16 +301,25 @@ export default function Home() {
     scheduledRevealsRef.current.clear();
 
     try {
-      // Prepare teams and combos
-      const singleTeams = getAvailableTeams();
-      const comboStrings = combos.map(combo => `${combo.team1}, ${combo.team2}`);
+      // Prepare combos (only complete ones)
+      const completeCombos = combos.filter(combo => combo.team1 && combo.team2);
+      const comboStrings = completeCombos.map(combo => `${combo.team1}, ${combo.team2}`);
 
-      // Validate totals
-      if (singleTeams.length + comboStrings.length !== userCount) {
-        setError(`Total assignments (${singleTeams.length} single + ${comboStrings.length} combos) must equal ${userCount} users.`);
+      // Calculate how many single teams we need
+      const singleTeamsNeeded = userCount - comboStrings.length;
+
+      if (singleTeamsNeeded < 0) {
+        setError(`Too many combos! You have ${comboStrings.length} combos but only ${userCount} users.`);
         setIsAssigning(false);
         return;
       }
+
+      // Get available teams (not used in combos) and randomly select the needed amount
+      const availableTeams = getAvailableTeams();
+
+      // Shuffle available teams and pick the needed amount
+      const shuffled = [...availableTeams].sort(() => Math.random() - 0.5);
+      const singleTeams = shuffled.slice(0, singleTeamsNeeded);
 
       // === PHASE 1: COMMIT ===
       setPhase("committing");
@@ -621,7 +624,7 @@ user30"
           <div className="text-center mb-12">
             <button
               onClick={handleAssign}
-              disabled={isAssigning || (!user || !user.loggedIn) || parsedUsernames.length !== userCount || (combos.length > 0 && !areCombosComplete())}
+              disabled={isAssigning || (!user || !user.loggedIn) || parsedUsernames.length !== userCount || combos.filter(c => c.team1 && c.team2).length > userCount}
               className="bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 disabled:from-slate-800 disabled:to-slate-900 disabled:cursor-not-allowed disabled:opacity-50 px-12 py-5 rounded-xl font-semibold text-2xl transition-all transform hover:scale-105 shadow-2xl border border-slate-600/50 hover:border-slate-500"
             >
               {isAssigning ? (
@@ -731,7 +734,7 @@ user30"
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => {
-                    const url = getFlowscanUrl(transactionId);
+                    const url = getFlowscanUrl(transactionId, IS_MAINNET);
                     navigator.clipboard.writeText(url);
                     alert("Link copied to clipboard!");
                   }}
@@ -743,7 +746,7 @@ user30"
                   Share Results
                 </button>
                 <a
-                  href={getFlowscanUrl(transactionId)}
+                  href={getFlowscanUrl(transactionId, IS_MAINNET)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600/50 px-4 py-2 rounded-lg text-sm transition-colors"

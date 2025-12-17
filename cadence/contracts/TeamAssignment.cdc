@@ -2,8 +2,8 @@
 // Smart contract for randomly assigning NBA Top Shot usernames to NBA teams
 // Uses Flow's commit-reveal pattern with native VRF for provably fair randomness
 
-import "RandomConsumer"
-import "Burner"
+import RandomConsumer from 0x45caec600164c9e6
+import Burner from 0xf233dcee88fe0abe
 
 access(all) contract TeamAssignment {
 
@@ -179,22 +179,22 @@ access(all) contract TeamAssignment {
 
         // Fulfill the committed randomness to get the seed value
         // This uses the randomness from the LOCK block, not the reveal block
-        let seed = self.consumer.fulfillRandomRequest(request: <-request)
-
-        // Use the committed seed to derive all random selections
-        // This ensures the outcome is deterministic based on the lock block
-        var seedValue = 0 as UInt64
-        for byte in seed {
-            seedValue = (seedValue << 8) | UInt64(byte)
-        }
+        // fulfillRandomRequest returns a UInt64 random value
+        var seedValue = self.consumer.fulfillRandomRequest(<-request)
 
         // Perform the random assignments using the committed seed
+        // Use XOR shift to derive multiple random values without overflow
         while remainingUsernames.length > 0 {
-            // Derive random indices from the seed (simple linear congruential generator)
-            seedValue = (seedValue &* 6364136223846793005 &+ 1442695040888963407)
+            // XOR shift algorithm (no multiplication, no overflow)
+            seedValue = seedValue ^ (seedValue << 13)
+            seedValue = seedValue ^ (seedValue >> 7)
+            seedValue = seedValue ^ (seedValue << 17)
             let usernameIndex = seedValue % UInt64(remainingUsernames.length)
 
-            seedValue = (seedValue &* 6364136223846793005 &+ 1442695040888963407)
+            // Another round for assignment index
+            seedValue = seedValue ^ (seedValue << 13)
+            seedValue = seedValue ^ (seedValue >> 7)
+            seedValue = seedValue ^ (seedValue << 17)
             let assignmentIndex = seedValue % UInt64(allAssignments.length)
 
             // Get selected username and team
