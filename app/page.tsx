@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { assignTeams, getAllAssignments, authenticate, getCurrentUser, AssignmentEvent } from "@/lib/flow-interactions";
+import {
+  commitTeamAssignment,
+  revealTeamAssignment,
+  waitForReveal,
+  getAllAssignments,
+  authenticate,
+  getFlowscanUrl,
+  AssignmentEvent
+} from "@/lib/flow-interactions";
 import { CONTRACT_ADDRESS } from "@/lib/flow.config";
 import { getTeamLogoUrl } from "@/lib/team-logos";
 import * as fcl from "@onflow/fcl";
@@ -23,6 +31,8 @@ interface Combo {
   team2: string | null;
 }
 
+type AssignmentPhase = "idle" | "committing" | "waiting" | "revealing" | "complete";
+
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -32,6 +42,7 @@ export default function Home() {
   const [currentFact, setCurrentFact] = useState<string>("");
   const [isAssigning, setIsAssigning] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
+  const [commitTxId, setCommitTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usernamesInput, setUsernamesInput] = useState<string>("");
   const [parsedUsernames, setParsedUsernames] = useState<string[]>([]);
@@ -40,6 +51,13 @@ export default function Home() {
   const [draggedTeam, setDraggedTeam] = useState<string | null>(null);
   const revealTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const scheduledRevealsRef = useRef<Set<number>>(new Set());
+
+  // Commit-Reveal state
+  const [phase, setPhase] = useState<AssignmentPhase>("idle");
+  const [lockBlock, setLockBlock] = useState<number>(0);
+  const [revealBlock, setRevealBlock] = useState<number>(0);
+  const [currentBlock, setCurrentBlock] = useState<number>(0);
+  const [statusMessage, setStatusMessage] = useState<string>("");
 
   // Check if user is logged in
   useEffect(() => {
@@ -277,6 +295,12 @@ export default function Home() {
     setIsFactRevealed(false);
     setCurrentFact("");
     setTransactionId(null);
+    setCommitTxId(null);
+    setLockBlock(0);
+    setRevealBlock(0);
+    setCurrentBlock(0);
+    setPhase("idle");
+    setStatusMessage("");
     // Clear any existing timeouts and reset reveal state
     revealTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
     revealTimeoutsRef.current = [];
@@ -286,7 +310,7 @@ export default function Home() {
       // Prepare teams and combos
       const singleTeams = getAvailableTeams();
       const comboStrings = combos.map(combo => `${combo.team1}, ${combo.team2}`);
-      
+
       // Validate totals
       if (singleTeams.length + comboStrings.length !== userCount) {
         setError(`Total assignments (${singleTeams.length} single + ${comboStrings.length} combos) must equal ${userCount} users.`);
@@ -294,14 +318,40 @@ export default function Home() {
         return;
       }
 
+      // === PHASE 1: COMMIT ===
+      setPhase("committing");
+      setStatusMessage("Locking in participants and teams...");
+
+      const commitResult = await commitTeamAssignment(
+        parsedUsernames,
+        singleTeams,
+        comboStrings,
+        CONTRACT_ADDRESS
+      );
+
+      setCommitTxId(commitResult.transactionId);
+      setLockBlock(commitResult.lockBlock);
+      setStatusMessage(`Locked at block #${commitResult.lockBlock}. Waiting for blockchain randomness...`);
+
+      // === PHASE 2: WAIT FOR BLOCKS ===
+      setPhase("waiting");
+
+      await waitForReveal(commitResult.lockBlock, (current, target) => {
+        setCurrentBlock(current);
+        setStatusMessage(`Waiting for randomness... Block ${current} / ${target}`);
+      });
+
+      // === PHASE 3: REVEAL ===
+      setPhase("revealing");
+      setStatusMessage("Revealing team assignments...");
+
       const newAssignments: Assignment[] = [];
 
       // Callback to handle real-time assignment updates
       const onAssignment = (assignment: AssignmentEvent) => {
-        // Check if this is a combo (contains comma)
         const isCombo = assignment.team.includes(",");
         const teams = isCombo ? assignment.team.split(",").map(t => t.trim()) : [assignment.team];
-        
+
         newAssignments.push({
           username: assignment.username,
           team: assignment.team,
@@ -309,24 +359,25 @@ export default function Home() {
           isCombo,
           teams: isCombo ? teams : undefined,
         });
-        // Sort by index and update state
         const sorted = [...newAssignments].sort((a, b) => a.index - b.index);
         setAssignments(sorted);
       };
 
-      // Execute the transaction
-      const txId = await assignTeams(
-        parsedUsernames,
-        singleTeams,
-        comboStrings,
-        onAssignment,
-        CONTRACT_ADDRESS
+      const revealResult = await revealTeamAssignment(
+        CONTRACT_ADDRESS,
+        onAssignment
       );
 
-      setTransactionId(txId);
+      setTransactionId(revealResult.transactionId);
+      setRevealBlock(revealResult.revealBlock);
+      setPhase("complete");
+      setStatusMessage("");
+
     } catch (err: any) {
       setError(err.message || "Failed to assign teams");
       console.error("Assignment error:", err);
+      setPhase("idle");
+      setStatusMessage("");
     } finally {
       setIsAssigning(false);
     }
@@ -595,12 +646,22 @@ user30"
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     ></path>
                   </svg>
-                  Processing...
+                  {phase === "committing" && "Locking Assignment..."}
+                  {phase === "waiting" && "Waiting for Randomness..."}
+                  {phase === "revealing" && "Revealing Teams..."}
+                  {phase === "idle" && "Processing..."}
                 </span>
               ) : (
                 "START THE BREAK..."
               )}
             </button>
+
+            {/* Phase Status Display */}
+            {isAssigning && statusMessage && (
+              <div className="mt-4 text-slate-400 text-sm animate-pulse">
+                {statusMessage}
+              </div>
+            )}
           </div>
 
           {/* Error Message */}
@@ -628,19 +689,78 @@ user30"
             </div>
           )}
 
-          {/* Transaction ID - Only show after all tiles are revealed */}
+          {/* Verification & Share Section - Only show after all tiles are revealed */}
           {transactionId && assignments.length > 0 && revealedAssignments.size === assignments.length && (
-            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4 mb-8 backdrop-blur-sm">
-              <p className="text-xs text-slate-400 mb-1">Transaction ID:</p>
-              <p className="font-mono text-xs break-all text-slate-300">{transactionId}</p>
-              <a
-                href={`https://flowscan.io/tx/${transactionId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-slate-400 hover:text-slate-300 text-xs mt-2 inline-block transition-colors"
-              >
-                View on Flowscan →
-              </a>
+            <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6 mb-8 backdrop-blur-sm">
+              {/* Verification Badge */}
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 bg-emerald-500/20 rounded-full flex items-center justify-center">
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-emerald-400 font-semibold text-sm">Provably Random Assignment</p>
+                  <p className="text-slate-500 text-xs">Verified by Flow's VRF (Verifiable Random Function)</p>
+                </div>
+              </div>
+
+              {/* Block Info */}
+              {lockBlock > 0 && revealBlock > 0 && (
+                <div className="bg-slate-900/50 rounded-lg p-3 mb-4 border border-slate-700/30">
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-slate-500">Locked at Block</p>
+                      <p className="font-mono text-slate-300">#{lockBlock}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">Revealed at Block</p>
+                      <p className="font-mono text-slate-300">#{revealBlock}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Transaction Info */}
+              <div className="mb-4">
+                <p className="text-xs text-slate-500 mb-1">Reveal Transaction:</p>
+                <p className="font-mono text-xs break-all text-slate-400">{transactionId}</p>
+              </div>
+
+              {/* Share Button */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => {
+                    const url = getFlowscanUrl(transactionId);
+                    navigator.clipboard.writeText(url);
+                    alert("Link copied to clipboard!");
+                  }}
+                  className="flex items-center gap-2 bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600/50 px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                  Share Results
+                </button>
+                <a
+                  href={getFlowscanUrl(transactionId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600/50 px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  View on Flowscan
+                </a>
+              </div>
+
+              {/* Verification Note */}
+              <p className="mt-4 text-xs text-slate-500 leading-relaxed">
+                This assignment is provably fair. The participants and teams were locked at block #{lockBlock},
+                and the random results were revealed at block #{revealBlock}. The randomness came from Flow's
+                blockchain after the lock, making manipulation impossible. Anyone can verify this on Flowscan.
+              </p>
             </div>
           )}
 
