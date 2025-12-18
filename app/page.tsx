@@ -884,7 +884,7 @@ user30"
                           )}
                         </div>
                         <div className="mt-auto">
-                          <div className="font-bold text-lg mb-2 text-slate-100">
+                          <div className="font-bold text-xl mb-2 text-slate-100">
                             {assignment.username}
                           </div>
                           <div className="text-slate-200 text-base font-semibold">
