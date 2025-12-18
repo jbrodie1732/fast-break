@@ -117,9 +117,13 @@ export async function commitTeamAssignment(
     if (sealed.events) {
       for (const event of sealed.events) {
         if (event.type.includes("CommitmentMade")) {
-          receiptID = parseInt(event.data.commitmentId || 0);
-          lockBlock = parseInt(event.data.lockBlock);
+          receiptID = parseInt(event.data.commitmentId || event.data.commitmentId || 0);
+          lockBlock = parseInt(event.data.lockBlock || 0);
           break;
+        }
+        // Also check for RandomnessSourced event which has the block
+        if (event.type.includes("RandomnessSourced") && event.data.block) {
+          lockBlock = parseInt(event.data.block);
         }
       }
     }
@@ -208,8 +212,8 @@ export async function revealTeamAssignment(
         }
 
         if (event.type.includes("TeamAssignmentComplete")) {
-          lockBlock = parseInt(event.data.lockBlock);
-          revealBlock = parseInt(event.data.revealBlock);
+          lockBlock = parseInt(event.data.lockBlock || 0);
+          revealBlock = parseInt(event.data.revealBlock || 0);
         }
       }
     }
@@ -279,7 +283,8 @@ export async function assignTeams(
   teams: string[],
   combos: string[],
   onAssignment: (assignment: AssignmentEvent) => void,
-  contractAddress: string
+  contractAddress: string,
+  onComplete?: (result: { transactionId: string; lockBlock: number; revealBlock: number }) => void
 ): Promise<string> {
   try {
     // PHASE 1: COMMIT
@@ -290,6 +295,9 @@ export async function assignTeams(
       contractAddress
     );
 
+    // Store lockBlock from commit phase
+    let finalLockBlock = commitResult.lockBlock;
+
     // PHASE 2: WAIT FOR BLOCKS
     await waitForReveal(commitResult.lockBlock, () => {});
 
@@ -298,6 +306,20 @@ export async function assignTeams(
       contractAddress,
       onAssignment
     );
+
+    // Use lockBlock from commit if reveal didn't extract it, otherwise use reveal's value
+    if (revealResult.lockBlock > 0) {
+      finalLockBlock = revealResult.lockBlock;
+    }
+
+    // Call completion callback with block numbers if provided
+    if (onComplete) {
+      onComplete({
+        transactionId: revealResult.transactionId,
+        lockBlock: finalLockBlock,
+        revealBlock: revealResult.revealBlock,
+      });
+    }
 
     // Return the reveal transaction ID (this is the final transaction)
     return revealResult.transactionId;

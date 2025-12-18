@@ -8,7 +8,7 @@ fcl.config({
   "accessNode.api": "https://rest-mainnet.onflow.org",
   "discovery.wallet": "https://fcl-discovery.onflow.org/mainnet/authn",
   "app.detail.title": "Fast-BREAK",
-  "app.detail.icon": "https://placekitten.com/g/200/200",
+  "app.detail.icon": "https://cdn.nba.com/headshots/nba/latest/1040x760/1630178.png",
   "0xrandomizeBreak": CONTRACT_ADDRESS,
   "0xrandomizeBreakv2": CONTRACT_ADDRESS,
 });

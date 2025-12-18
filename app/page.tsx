@@ -61,9 +61,15 @@ export default function Home() {
     fcl.currentUser.subscribe(setUser);
   }, []);
 
-  // Load existing assignments on mount
+  // Clear assignments on page load/refresh
   useEffect(() => {
-    loadAssignments();
+    // Don't load assignments on mount - clear everything instead
+    setAssignments([]);
+    setRevealedAssignments(new Set());
+    setTransactionId(null);
+    setLockBlock(0);
+    setRevealBlock(0);
+    setIsHeaderRevealed(false);
   }, []);
 
   // Calculate combos needed when user count changes
@@ -346,15 +352,17 @@ export default function Home() {
         singleTeams,
         comboStrings,
         onAssignment,
-        CONTRACT_ADDRESS
+        CONTRACT_ADDRESS,
+        (result) => {
+          // Extract block numbers from completion callback
+          setLockBlock(result.lockBlock);
+          setRevealBlock(result.revealBlock);
+        }
       );
 
       setTransactionId(revealTransactionId);
       setPhase("complete");
       setStatusMessage("");
-      
-      // Note: lockBlock and revealBlock will be extracted from events if needed
-      // For now, we'll get them from the transaction result if available
 
     } catch (err: any) {
       setError(err.message || "Failed to assign teams");
@@ -405,7 +413,7 @@ export default function Home() {
           </div>
 
           {/* Header */}
-          <div className="text-center mb-12">
+          <div className="text-center mb-8">
             <h1 className="text-6xl font-black mb-4 bg-gradient-to-r from-slate-100 via-slate-300 to-slate-100 bg-clip-text text-transparent tracking-tight">
               Fast-BREAK
             </h1>
@@ -414,33 +422,52 @@ export default function Home() {
             </p>
           </div>
 
-          {/* User Count Selector - Only show when wallet is connected */}
-          {user && user.loggedIn && (
-            <div className="mb-8 max-w-xs mx-auto">
-              <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-4 border border-slate-800/50 shadow-xl">
-                <label className="block text-sm font-medium text-slate-300 mb-3 text-center">
-                  Number of Users:
-                </label>
-                <div className="flex justify-center">
-                  <select
-                    value={userCount}
-                    onChange={(e) => setUserCount(parseInt(e.target.value))}
-                    className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 text-center min-w-[120px]"
-                    disabled={isAssigning}
-                  >
-                    {Array.from({ length: 30 }, (_, i) => i + 1).map(num => (
-                      <option key={num} value={num}>{num}</option>
-                    ))}
-                  </select>
-                </div>
-                {userCount < 30 && (
-                  <p className="mt-3 text-xs text-slate-400 text-center">
-                    {30 - userCount} multi-team combo{30 - userCount !== 1 ? 's' : ''} needed
-                  </p>
-                )}
-              </div>
+          {/* Clear Results Button - Only show after completion */}
+          {transactionId && assignments.length > 0 && revealedAssignments.size === assignments.length && !isAssigning && (
+            <div className="text-center mb-8">
+              <button
+                onClick={() => {
+                  setAssignments([]);
+                  setRevealedAssignments(new Set());
+                  setTransactionId(null);
+                  setLockBlock(0);
+                  setRevealBlock(0);
+                  setIsHeaderRevealed(false);
+                  setUsernamesInput("");
+                  setParsedUsernames([]);
+                }}
+                className="bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700/50 px-6 py-2 rounded-lg text-sm transition-colors text-slate-300 hover:text-white"
+              >
+                Clear Results
+              </button>
             </div>
           )}
+
+          {/* User Count Selector - Always show, but disabled when wallet not connected */}
+          <div className="mb-8 max-w-xs mx-auto">
+            <div className="bg-slate-900/40 backdrop-blur-lg rounded-2xl p-4 border border-slate-800/50 shadow-xl">
+              <label className="block text-sm font-medium text-slate-300 mb-3 text-center">
+                Number of Users:
+              </label>
+              <div className="flex justify-center">
+                <select
+                  value={userCount}
+                  onChange={(e) => setUserCount(parseInt(e.target.value))}
+                  className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 text-center min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isAssigning || !user || !user.loggedIn}
+                >
+                  {Array.from({ length: 30 }, (_, i) => i + 1).map(num => (
+                    <option key={num} value={num}>{num}</option>
+                  ))}
+                </select>
+              </div>
+              {userCount < 30 && (
+                <p className="mt-3 text-xs text-slate-400 text-center">
+                  {30 - userCount} multi-team combo{30 - userCount !== 1 ? 's' : ''} needed
+                </p>
+              )}
+            </div>
+          </div>
 
           {/* Combo Builder - Only show when combos are needed */}
           {user && user.loggedIn && combos.length > 0 && (
@@ -577,9 +604,9 @@ user2
 user3
 ...
 user30"
-                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 resize-none font-mono text-sm min-h-[200px]"
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-600 focus:border-slate-600 resize-none font-mono text-sm min-h-[200px] disabled:opacity-50 disabled:cursor-not-allowed"
                 rows={10}
-                disabled={isAssigning}
+                disabled={isAssigning || !user || !user.loggedIn}
               />
               <div className="mt-3 flex items-center justify-between">
                 <p className="text-xs text-slate-500">
