@@ -271,6 +271,43 @@ export async function waitForReveal(
   }
 }
 
+// ============ Unified Assignment Function ============
+
+// Execute the assignment transaction using commit-reveal scheme
+// This function handles both phases automatically for a seamless user experience
+export async function assignTeams(
+  usernames: string[],
+  teams: string[],
+  combos: string[],
+  onAssignment: (assignment: AssignmentEvent) => void,
+  contractAddress: string
+): Promise<string> {
+  try {
+    // PHASE 1: COMMIT
+    const commitResult = await commitTeamAssignment(
+      usernames,
+      teams,
+      combos,
+      contractAddress
+    );
+
+    // PHASE 2: WAIT FOR BLOCKS
+    await waitForReveal(commitResult.lockBlock, () => {});
+
+    // PHASE 3: REVEAL
+    const revealResult = await revealTeamAssignment(
+      contractAddress,
+      onAssignment
+    );
+
+    // Return the reveal transaction ID (this is the final transaction)
+    return revealResult.transactionId;
+  } catch (error) {
+    console.error("Error assigning teams:", error);
+    throw error;
+  }
+}
+
 // ============ Query Functions ============
 
 // Get all assignments from the contract
