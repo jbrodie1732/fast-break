@@ -24,7 +24,7 @@ export const getTeamLogoUrl = (teamName: string): string => {
     "New Orleans Pelicans": "https://a.espncdn.com/i/teamlogos/nba/500/no.png",
     "New York Knicks": "https://a.espncdn.com/i/teamlogos/nba/500/ny.png",
     "Oklahoma City Thunder": "https://a.espncdn.com/i/teamlogos/nba/500/okc.png",
-    "Orlando Magic": "https://toppng.com/uploads/preview/orlando-magic-logo-transparent-11563613412czsw8bbvg0.png",
+    "Orlando Magic": "/logos/orlando-magic.png",
     "Philadelphia 76ers": "https://a.espncdn.com/i/teamlogos/nba/500/phi.png",
     "Phoenix Suns": "https://a.espncdn.com/i/teamlogos/nba/500/phx.png",
     "Portland Trail Blazers": "https://a.espncdn.com/i/teamlogos/nba/500/por.png",
