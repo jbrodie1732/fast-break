@@ -435,6 +435,14 @@ export default function Home() {
                   setIsHeaderRevealed(false);
                   setUsernamesInput("");
                   setParsedUsernames([]);
+                  // Clear combo selections
+                  setCombos(prevCombos => 
+                    prevCombos.map(combo => ({
+                      ...combo,
+                      team1: null,
+                      team2: null
+                    }))
+                  );
                 }}
                 className="bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700/50 px-6 py-2 rounded-lg text-sm transition-colors text-slate-300 hover:text-white"
               >
@@ -527,21 +535,30 @@ export default function Home() {
                                 e.preventDefault();
                                 handleDrop(combo.id, "team1");
                               }}
-                              className="min-h-[80px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center relative bg-slate-700/20 border-slate-600/50"
+                              className={`min-h-[80px] rounded-lg flex flex-col items-center justify-center relative transition-all duration-300 ${
+                                combo.team1
+                                  ? "border-2 border-solid border-emerald-500/60 bg-emerald-500/10 shadow-lg shadow-emerald-500/20"
+                                  : "border-2 border-dashed bg-slate-700/20 border-slate-600/50"
+                              }`}
                             >
                               {combo.team1 ? (
                                 <>
+                                  <div className="absolute top-1 right-1 w-4 h-4 bg-emerald-500/80 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
                                   <img
                                     src={getTeamLogoUrl(combo.team1)}
                                     alt={combo.team1}
                                     className="w-12 h-12 object-contain"
                                   />
-                                  <span className="text-[10px] text-slate-400 mt-1 text-center leading-tight">
+                                  <span className="text-[10px] text-slate-300 mt-1 text-center leading-tight font-medium">
                                     {combo.team1.split(" ").pop()}
                                   </span>
                                   <button
                                     onClick={() => removeTeamFromCombo(combo.id, "team1")}
-                                    className="absolute top-1 right-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                                    className="absolute top-1 left-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center transition-all"
                                   >
                                     ×
                                   </button>
@@ -557,21 +574,30 @@ export default function Home() {
                                 e.preventDefault();
                                 handleDrop(combo.id, "team2");
                               }}
-                              className="min-h-[80px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center relative bg-slate-700/20 border-slate-600/50"
+                              className={`min-h-[80px] rounded-lg flex flex-col items-center justify-center relative transition-all duration-300 ${
+                                combo.team2
+                                  ? "border-2 border-solid border-emerald-500/60 bg-emerald-500/10 shadow-lg shadow-emerald-500/20"
+                                  : "border-2 border-dashed bg-slate-700/20 border-slate-600/50"
+                              }`}
                             >
                               {combo.team2 ? (
                                 <>
+                                  <div className="absolute top-1 right-1 w-4 h-4 bg-emerald-500/80 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
                                   <img
                                     src={getTeamLogoUrl(combo.team2)}
                                     alt={combo.team2}
                                     className="w-12 h-12 object-contain"
                                   />
-                                  <span className="text-[10px] text-slate-400 mt-1 text-center leading-tight">
+                                  <span className="text-[10px] text-slate-300 mt-1 text-center leading-tight font-medium">
                                     {combo.team2.split(" ").pop()}
                                   </span>
                                   <button
                                     onClick={() => removeTeamFromCombo(combo.id, "team2")}
-                                    className="absolute top-1 right-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                                    className="absolute top-1 left-1 w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-full text-white text-xs flex items-center justify-center transition-all"
                                   >
                                     ×
                                   </button>
@@ -717,15 +743,15 @@ user30"
 
               {/* Block Info */}
               {lockBlock > 0 && revealBlock > 0 && (
-                <div className="bg-slate-900/50 rounded-lg p-3 mb-4 border border-slate-700/30">
-                  <div className="grid grid-cols-2 gap-4 text-xs">
-                    <div>
-                      <p className="text-slate-500">Locked at Block</p>
-                      <p className="font-mono text-slate-300">#{lockBlock}</p>
+                <div className="bg-slate-900/50 rounded-lg p-4 mb-4 border border-slate-700/30">
+                  <div className="flex justify-center items-center gap-8">
+                    <div className="text-center">
+                      <p className="text-slate-500 text-xs mb-1">Locked at Block</p>
+                      <p className="font-mono text-slate-200 text-lg font-semibold">#{lockBlock}</p>
                     </div>
-                    <div>
-                      <p className="text-slate-500">Revealed at Block</p>
-                      <p className="font-mono text-slate-300">#{revealBlock}</p>
+                    <div className="text-center">
+                      <p className="text-slate-500 text-xs mb-1">Revealed at Block</p>
+                      <p className="font-mono text-slate-200 text-lg font-semibold">#{revealBlock}</p>
                     </div>
                   </div>
                 </div>
