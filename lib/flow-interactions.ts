@@ -1,61 +1,56 @@
 import * as fcl from "@onflow/fcl";
+import * as t from "@onflow/types";
 
-// Commit transaction - requests randomness and creates a Receipt resource
-const assignTeamsCommitTransaction = `
-import randomizeBreakv2 from 0xrandomizeBreakv2
+// ============ Transaction Code ============
+
+// Phase 1: Commit transaction - locks in the assignment
+const commitTransaction = `
+import TeamAssignment from 0xTeamAssignment
 
 transaction(usernames: [String], teams: [String], combos: [String]) {
-    
+
     prepare(signer: auth(Storage) &Account) {
-        // Commit the assignment request
-        // This requests randomness and creates a Receipt resource
-        // RandomConsumer.requestRandomness() automatically emits RandomnessSourced event
-        let receipt <- randomizeBreakv2.commitAssignment(
+        // Commit the assignment and get a receipt
+        let receipt <- TeamAssignment.commitAssignment(
             usernames: usernames,
             teams: teams,
             combos: combos
         )
-        
-        // Get UUID before moving the receipt
-        let receiptUUID = receipt.uuid
-        
-        // Store the receipt in the signer's account storage
+
+        // Store the receipt in the user's account for later reveal
         signer.storage.save(<-receipt, to: /storage/TeamAssignmentReceipt)
-        
-        log("Receipt created and stored. UUID: ".concat(receiptUUID.toString()))
     }
 }
 `;
 
-// Reveal transaction - uses randomness from committed block to make assignments
-const assignTeamsRevealTransaction = `
-import randomizeBreakv2 from 0xrandomizeBreakv2
+// Phase 2: Reveal transaction - reveals the random assignments
+const revealTransaction = `
+import TeamAssignment from 0xTeamAssignment
 
-transaction() {
-    
+transaction {
+
     prepare(signer: auth(Storage) &Account) {
-        // Load the receipt from account storage
-        let receipt <- signer.storage.load<@randomizeBreakv2.Receipt>(
+        // Load the receipt from storage
+        let receipt <- signer.storage.load<@TeamAssignment.Receipt>(
             from: /storage/TeamAssignmentReceipt
-        ) ?? panic("No receipt found in account storage")
-        
-        // Reveal and assign using randomness from the committed block
-        // RandomConsumer.fulfillRandomRequest() automatically emits RandomnessFulfilled event
-        let assignments = randomizeBreakv2.revealAndAssign(receipt: <-receipt)
-        
-        log("Assignments completed: ".concat(assignments.length.toString()))
+        ) ?? panic("No receipt found. Did you commit first?")
+
+        // Reveal the assignments (this consumes the receipt)
+        TeamAssignment.revealAssignment(receipt: <-receipt)
     }
 }
 `;
 
-// Read the script file
+// Script to get all assignments
 const getAssignmentsScript = `
-import randomizeBreakv2 from 0xrandomizeBreakv2
+import TeamAssignment from 0xTeamAssignment
 
-pub fun main(): {UInt64: randomizeBreakv2.Assignment} {
-    return randomizeBreakv2.getAllAssignments()
+access(all) fun main(): {UInt64: TeamAssignment.Assignment} {
+    return TeamAssignment.getAllAssignments()
 }
 `;
+
+// ============ Interfaces ============
 
 export interface Assignment {
   username: string;
@@ -70,26 +65,38 @@ export interface AssignmentEvent {
   assignmentIndex: number;
 }
 
-// Execute the assignment transaction using commit-reveal scheme
-// This function handles both phases automatically for a seamless user experience
-export async function assignTeams(
+export interface CommitResult {
+  transactionId: string;
+  receiptID: number;
+  lockBlock: number;
+}
+
+export interface RevealResult {
+  transactionId: string;
+  lockBlock: number;
+  revealBlock: number;
+  assignments: AssignmentEvent[];
+}
+
+// ============ Commit Phase ============
+
+// Execute the commit transaction - locks in participants and teams
+export async function commitTeamAssignment(
   usernames: string[],
   teams: string[],
   combos: string[],
-  onAssignment: (assignment: AssignmentEvent) => void,
   contractAddress: string
-): Promise<string> {
+): Promise<CommitResult> {
   try {
-    // PHASE 1: COMMIT
-    // Replace contract address placeholder in commit transaction
-    const commitTransactionCode = assignTeamsCommitTransaction.replace(
-      "0xrandomizeBreakv2",
+    // Replace contract address placeholder
+    const transactionCode = commitTransaction.replace(
+      /0xTeamAssignment/g,
       contractAddress
     );
 
-    // Execute commit transaction
-    const commitTransactionId = await fcl.mutate({
-      cadence: commitTransactionCode,
+    // Build and submit the transaction
+    const transactionId = await fcl.mutate({
+      cadence: transactionCode,
       args: (arg: any, t: any) => [
         arg(usernames, t.Array(t.String)),
         arg(teams, t.Array(t.String)),
@@ -101,97 +108,184 @@ export async function assignTeams(
       limit: 9999,
     });
 
-    // Wait for commit transaction to be sealed
-    const commitSealed = await fcl.tx(commitTransactionId).onceSealed();
-    
-    // The receipt is now stored in the user's account storage
-    // We can proceed directly to reveal phase
+    // Wait for transaction to be sealed
+    const sealed = await fcl.tx(transactionId).onceSealed();
 
-    // PHASE 2: REVEAL
-    // Replace contract address placeholder in reveal transaction
-    const revealTransactionCode = assignTeamsRevealTransaction.replace(
-      "0xrandomizeBreakv2",
+    // Extract commit event data
+    let receiptID = 0;
+    let lockBlock = 0;
+
+    if (sealed.events) {
+      for (const event of sealed.events) {
+        if (event.type.includes("TeamAssignmentStarted")) {
+          receiptID = parseInt(event.data.receiptID);
+          lockBlock = parseInt(event.data.lockBlock);
+          break;
+        }
+      }
+    }
+
+    return {
+      transactionId,
+      receiptID,
+      lockBlock,
+    };
+  } catch (error) {
+    console.error("Error committing team assignment:", error);
+    throw error;
+  }
+}
+
+// ============ Reveal Phase ============
+
+// Execute the reveal transaction - reveals random assignments
+export async function revealTeamAssignment(
+  contractAddress: string,
+  onAssignment: (assignment: AssignmentEvent) => void
+): Promise<RevealResult> {
+  try {
+    // Replace contract address placeholder
+    const transactionCode = revealTransaction.replace(
+      /0xTeamAssignment/g,
       contractAddress
     );
 
-    // Execute reveal transaction (no arguments needed - loads Receipt from storage)
-    const revealTransactionId = await fcl.mutate({
-      cadence: revealTransactionCode,
+    // Build and submit the transaction
+    const transactionId = await fcl.mutate({
+      cadence: transactionCode,
       args: (arg: any, t: any) => [],
       proposer: fcl.authz as any,
       payer: fcl.authz as any,
-      authorizations: [fcl.authz as any], // Need authorization to access account storage
+      authorizations: [fcl.authz as any],
       limit: 9999,
     });
 
-    // Subscribe to events to get real-time updates as reveal transaction processes
+    // Track processed events to avoid duplicates
     const processedEvents = new Set<string>();
-    
-    fcl.tx(revealTransactionId).subscribe((res: any) => {
-      // Process events as they come in (status 2 = executed, status 4 = sealed)
+    const assignments: AssignmentEvent[] = [];
+
+    // Subscribe to events for real-time updates
+    fcl.tx(transactionId).subscribe((res: any) => {
       if (res.status >= 2 && res.events) {
         res.events.forEach((event: any) => {
-          // Create unique key for event to avoid duplicates
-          const eventKey = `${event.type}-${event.data.assignmentIndex}`;
-          
-          // Handle ParticipantAssigned events
+          const eventKey = `${event.type}-${event.data.assignmentNumber}`;
+
           if (event.type.includes("ParticipantAssigned") && !processedEvents.has(eventKey)) {
             processedEvents.add(eventKey);
             const assignment: AssignmentEvent = {
-              username: event.data.username,
-              team: event.data.team,
-              assignmentIndex: parseInt(event.data.assignmentIndex),
+              username: event.data.participant,
+              team: event.data.assignedTo,
+              assignmentIndex: parseInt(event.data.assignmentNumber) - 1,
             };
+            assignments.push(assignment);
             onAssignment(assignment);
           }
         });
       }
     });
 
-    // Wait for reveal transaction to be sealed
-    const revealSealed = await fcl.tx(revealTransactionId).onceSealed();
-    
-    // Extract any remaining ParticipantAssigned events that might have been missed
-    if (revealSealed.events) {
-      revealSealed.events.forEach((event: any) => {
-        const eventKey = `${event.type}-${event.data.assignmentIndex}`;
-        
-        // Handle ParticipantAssigned events
-        if (event.type.includes("ParticipantAssigned") && !processedEvents.has(eventKey)) {
-          processedEvents.add(eventKey);
-          const assignment: AssignmentEvent = {
-            username: event.data.username,
-            team: event.data.team,
-            assignmentIndex: parseInt(event.data.assignmentIndex),
-          };
-          onAssignment(assignment);
+    // Wait for transaction to be sealed
+    const sealed = await fcl.tx(transactionId).onceSealed();
+
+    // Extract completion event data
+    let lockBlock = 0;
+    let revealBlock = 0;
+
+    if (sealed.events) {
+      // Process any remaining events
+      for (const event of sealed.events) {
+        if (event.type.includes("ParticipantAssigned")) {
+          const eventKey = `${event.type}-${event.data.assignmentNumber}`;
+          if (!processedEvents.has(eventKey)) {
+            processedEvents.add(eventKey);
+            const assignment: AssignmentEvent = {
+              username: event.data.participant,
+              team: event.data.assignedTo,
+              assignmentIndex: parseInt(event.data.assignmentNumber) - 1,
+            };
+            assignments.push(assignment);
+            onAssignment(assignment);
+          }
         }
-      });
+
+        if (event.type.includes("TeamAssignmentComplete")) {
+          lockBlock = parseInt(event.data.lockBlock);
+          revealBlock = parseInt(event.data.revealBlock);
+        }
+      }
     }
 
-    // Return the reveal transaction ID (this is the final transaction)
-    return revealTransactionId;
+    return {
+      transactionId,
+      lockBlock,
+      revealBlock,
+      assignments,
+    };
   } catch (error) {
-    console.error("Error assigning teams:", error);
+    console.error("Error revealing team assignment:", error);
     throw error;
   }
 }
 
+// ============ Block Utilities ============
+
+// Get the current block height
+export async function getLatestBlockHeight(): Promise<number> {
+  try {
+    const block = await fcl.block({ sealed: true });
+    return block.height;
+  } catch (error) {
+    console.error("Error getting block height:", error);
+    throw error;
+  }
+}
+
+// Check if enough blocks have passed since commit for reveal
+// Flow's VRF typically needs 1-2 blocks to be ready
+export async function canReveal(lockBlock: number): Promise<boolean> {
+  const currentBlock = await getLatestBlockHeight();
+  // Need at least 1 block after the lock block
+  return currentBlock > lockBlock;
+}
+
+// Wait until reveal is possible
+export async function waitForReveal(
+  lockBlock: number,
+  onBlockUpdate?: (currentBlock: number, targetBlock: number) => void
+): Promise<void> {
+  const targetBlock = lockBlock + 1;
+
+  while (true) {
+    const currentBlock = await getLatestBlockHeight();
+
+    if (onBlockUpdate) {
+      onBlockUpdate(currentBlock, targetBlock);
+    }
+
+    if (currentBlock >= targetBlock) {
+      return;
+    }
+
+    // Poll every 500ms
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+// ============ Query Functions ============
+
 // Get all assignments from the contract
 export async function getAllAssignments(contractAddress: string): Promise<Record<number, Assignment>> {
   try {
-    // Replace contract address placeholder in script
     const scriptCode = getAssignmentsScript.replace(
-      /0xrandomizeBreakv2/g,
+      /0xTeamAssignment/g,
       contractAddress
     );
-    
+
     const result = await fcl.query({
       cadence: scriptCode,
       args: (arg: any, t: any) => [],
     });
 
-    // Transform the result to match our Assignment interface
     const assignments: Record<number, Assignment> = {};
     Object.keys(result).forEach((key) => {
       const assignment = result[key];
@@ -210,17 +304,26 @@ export async function getAllAssignments(contractAddress: string): Promise<Record
   }
 }
 
-// Authenticate user
+// ============ Authentication ============
+
 export async function authenticate(): Promise<void> {
   await fcl.authenticate();
 }
 
-// Logout user
 export async function unauthenticate(): Promise<void> {
   await fcl.unauthenticate();
 }
 
-// Get current user
 export function getCurrentUser() {
   return fcl.currentUser;
+}
+
+// ============ Utility Functions ============
+
+// Generate Flowscan URL for a transaction
+export function getFlowscanUrl(transactionId: string, isMainnet: boolean = true): string {
+  const baseUrl = isMainnet
+    ? "https://flowscan.io/transaction"
+    : "https://testnet.flowscan.io/transaction";
+  return `${baseUrl}/${transactionId}`;
 }
