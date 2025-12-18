@@ -30,6 +30,7 @@ yarn-error.log*
 
 # Sensitive files
 YOUR_KEYS.txt
+MAINNET_DEPLOY_KEY.txt
 flow.json
 
 # Vercel

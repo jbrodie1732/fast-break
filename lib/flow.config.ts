@@ -9,7 +9,8 @@ fcl.config({
   "discovery.wallet": "https://fcl-discovery.onflow.org/mainnet/authn",
   "app.detail.title": "Fast-BREAK",
   "app.detail.icon": "https://placekitten.com/g/200/200",
-  "0xTeamAssignment": CONTRACT_ADDRESS,
+  "0xrandomizeBreak": CONTRACT_ADDRESS,
+  "0xrandomizeBreakv2": CONTRACT_ADDRESS,
 });
 
 export { CONTRACT_ADDRESS };
