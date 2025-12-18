@@ -887,7 +887,7 @@ user30"
                           <div className="font-bold text-lg mb-2 text-slate-100">
                             {assignment.username}
                           </div>
-                          <div className="text-slate-400 text-sm font-medium">
+                          <div className="text-slate-200 text-base font-semibold">
                             {isCombo ? teams.join(" + ") : assignment.team}
                           </div>
                         </div>
