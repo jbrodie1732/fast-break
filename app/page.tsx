@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  commitTeamAssignment,
-  revealTeamAssignment,
-  waitForReveal,
+  assignTeams,
   getAllAssignments,
   authenticate,
   getFlowscanUrl,
@@ -42,7 +40,6 @@ export default function Home() {
   const [currentFact, setCurrentFact] = useState<string>("");
   const [isAssigning, setIsAssigning] = useState(false);
   const [transactionId, setTransactionId] = useState<string | null>(null);
-  const [commitTxId, setCommitTxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usernamesInput, setUsernamesInput] = useState<string>("");
   const [parsedUsernames, setParsedUsernames] = useState<string[]>([]);
@@ -295,7 +292,6 @@ export default function Home() {
     setIsFactRevealed(false);
     setCurrentFact("");
     setTransactionId(null);
-    setCommitTxId(null);
     setLockBlock(0);
     setRevealBlock(0);
     setCurrentBlock(0);
@@ -322,29 +318,6 @@ export default function Home() {
       setPhase("committing");
       setStatusMessage("Locking in participants and teams...");
 
-      const commitResult = await commitTeamAssignment(
-        parsedUsernames,
-        singleTeams,
-        comboStrings,
-        CONTRACT_ADDRESS
-      );
-
-      setCommitTxId(commitResult.transactionId);
-      setLockBlock(commitResult.lockBlock);
-      setStatusMessage(`Locked at block #${commitResult.lockBlock}. Waiting for blockchain randomness...`);
-
-      // === PHASE 2: WAIT FOR BLOCKS ===
-      setPhase("waiting");
-
-      await waitForReveal(commitResult.lockBlock, (current, target) => {
-        setCurrentBlock(current);
-        setStatusMessage(`Waiting for randomness... Block ${current} / ${target}`);
-      });
-
-      // === PHASE 3: REVEAL ===
-      setPhase("revealing");
-      setStatusMessage("Revealing team assignments...");
-
       const newAssignments: Assignment[] = [];
 
       // Callback to handle real-time assignment updates
@@ -363,15 +336,25 @@ export default function Home() {
         setAssignments(sorted);
       };
 
-      const revealResult = await revealTeamAssignment(
-        CONTRACT_ADDRESS,
-        onAssignment
+      // === PHASE 2: REVEAL ===
+      setPhase("revealing");
+      setStatusMessage("Revealing team assignments...");
+
+      // assignTeams handles both commit and reveal phases automatically
+      const revealTransactionId = await assignTeams(
+        parsedUsernames,
+        singleTeams,
+        comboStrings,
+        onAssignment,
+        CONTRACT_ADDRESS
       );
 
-      setTransactionId(revealResult.transactionId);
-      setRevealBlock(revealResult.revealBlock);
+      setTransactionId(revealTransactionId);
       setPhase("complete");
       setStatusMessage("");
+      
+      // Note: lockBlock and revealBlock will be extracted from events if needed
+      // For now, we'll get them from the transaction result if available
 
     } catch (err: any) {
       setError(err.message || "Failed to assign teams");
