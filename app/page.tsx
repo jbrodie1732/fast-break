@@ -725,8 +725,8 @@ user30"
             </div>
           )}
 
-          {/* Verification & Share Section - Only show after all tiles are revealed */}
-          {transactionId && assignments.length > 0 && revealedAssignments.size === assignments.length && (
+          {/* Verification & Share Section - Show once transaction is complete (before reveals start) */}
+          {transactionId && phase === "complete" && (
             <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-6 mb-8 backdrop-blur-sm">
               {/* Verification Badge */}
               <div className="flex items-center gap-3 mb-4">
